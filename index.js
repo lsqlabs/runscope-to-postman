@@ -194,32 +194,33 @@ var runscopeConverterV1 = {
 	getRHSFromComparisonAndOperands: function(comparison, oper1, oper2) {
 		switch(comparison) {
 			case 'equal_number':
+				return `pm.expect(${oper1}).to.equal(${oper2})`;
 			case 'equal':
-				return oper1 + ' == ' + oper2;
+				return `pm.expect(${oper1}).to.equal(${oper2})`;
 			case 'not_equal':
-				return oper1 + '!=' + oper2;
+				return `pm.expect(${oper1}).to.not.equal(${oper2})`;
 			case 'empty':
-				return '_.isEmpty(' + oper1 + ')';
+				return `pm.expect(${oper1}).to.be.empty`;
 			case 'not_empty':
-				return '!_.isEmpty(' + oper1 + ')';
+				return `pm.expect(${oper1}).not.to.be.empty`;
 			case 'contains':
-				return '_.contains(' + oper1 + ')';
+				return `pm.expect(${oper1}).to.include(${oper2})`;
 			case 'does_not_contain':
-				return '!_.contains(' + oper1 + ')';
+				return `pm.expect(${oper1}).not.to.include(${oper2})`;
 			case 'is_a_number':
-				return '!isNaN('+oper1+')';
+				return `pm.expect(!isNaN(${oper1})).to.be.true`;
 			case 'is_less_than':
-				return oper1 + ' < ' + oper2;
+				return `pm.expect(${oper1}).to.be.below(${oper2})`;
 			case 'is_less_than_or_equal':
-				return oper1 + ' <= ' + oper2;
+				return `pm.expect(${oper1}).to.be.at.most(${oper2})`;
 			case 'is_greater_than':
-				return oper1 + ' > ' + oper2;
+				return `pm.expect(${oper1}).to.be.above(${oper2})`;
 			case 'is_greater_than_or_equal':
-				return oper1 + ' >= ' + oper2;
+				return `pm.expect(${oper1}).to.be.at.least(${oper2})`;
 			case 'has_key':
-				return oper1 + '.hasOwnProperty(' + oper2 + ')';
+				return `pm.expect(${oper1}).to.have.property(${oper2})`;
 			case 'has_value':
-				return '_.contains(_.values(' + oper1 + '), ' + oper2 + ')';
+				return `pm.expect(${oper1}).to.include(${oper2})`;
 			default:
 				return '<comparison here>';
 		}
@@ -228,12 +229,14 @@ var runscopeConverterV1 = {
 	handleAssertions: function (request, step) {
 		var tests = '',
 			oldThis = this;
+
+		tests += 'const response = pm.response.json();\n\n';
+
 		_.each(step.assertions, function (ass) {
 
 			var testName = '',
 				oper1 = null,
-				oper2 = '\'' + ass.value + '\'',
-				testScript = '';
+				oper2 = ass.value;
 
 			// Handle source (LHS)
 			switch(ass.source) {
@@ -249,11 +252,11 @@ var runscopeConverterV1 = {
 				case 'response_json':
 					if(ass.property) {
 						testName += 'Response.' + ass.property + ' is correct';
-						oper1 = 'JSON.parse(responseBody).'+ass.property;
+						oper1 = 'response.'+ass.property;
 					}
 					else {
 						testName += 'JSON Response is correct';
-						oper1 = 'JSON.parse(responseBody)';
+						oper1 = 'response';
 					}
 					break;
 				case 'response_size':
@@ -269,21 +272,34 @@ var runscopeConverterV1 = {
 					break;
 			}
 
-			if(oper1) {
-				testScript = 'tests["' + testName + '"] = ' + 
-					oldThis.getRHSFromComparisonAndOperands(ass.comparison, oper1, oper2) + ';';
-				if(testScript.indexOf('JSON.parse') > -1) {
-					testScript = 'try {\n\t' + testScript + '\n}\ncatch(e) {\n\t'+
-					'tests["' + testName + '"] = false;\n\t' +
-					'console.log(\"Could not parse JSON\");\n}';
+			if (typeof oper2 === 'string') {
+				const variableMatch = oper2.match(/^{{(.*)}}$/);
+				if (variableMatch) {
+					oper2 = `pm.environment.get('${variableMatch[1]}')`;
+				} else if (oper2.match(/{{(.*)}}/)) {
+				    oper2 = '`' + oper2.replace(/{{(.*)}}/g, '\${pm.environment.get(\'$1\')}') + '`';
+				} else if (oper2 !== 'true' && oper2 !== 'false') {
+					oper2 = `'${oper2}'`;
 				}
-				tests += testScript + '\n\n';
+			}
+
+			if (oper1) {
+				tests += `pm.test("${testName}", () => {
+	${oldThis.getRHSFromComparisonAndOperands(ass.comparison, oper1, oper2)};
+});
+
+`;
+			}
+		});
+
+		_.each(step.variables, variable => {
+			if (variable.source == 'response_json') {
+				tests += `pm.environment.set('${variable.name}', response.${variable.property});\n`;
 			}
 		});
 
 		if(!_.isEmpty(tests)) {
-			request.tests += '//==== This section is Postman-compliant ====\n' + 
-				tests + '\n';
+			request.tests += tests;
 		}
 	},
 
@@ -296,7 +312,7 @@ var runscopeConverterV1 = {
 			headers: oldThis.getPostmanHeadersFromRunscopeHeaders(step.headers),
 			pathVariables: {},
 			method: step.method,
-			name: step.url,
+			name: step.note ? step.note : step.url.substring(step.url.lastIndexOf('/') + 1),
 			description: step.note,
 			tests: ''
 		};
