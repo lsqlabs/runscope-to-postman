@@ -19,7 +19,7 @@
   ],
   "dependencies": {
     "lodash": "^4.17.5",
-    "uuid": "^3.2.1"
+    "uuid": "^3.4.0"
   },
   "devDependencies": {
     "expect.js": "^0.3.1",
